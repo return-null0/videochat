@@ -1,0 +1,78 @@
+/* Mobile-First CSS */
+body { 
+    margin: 0; 
+    padding: 0; 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+    background: #000; 
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Prevent scrolling */
+}
+
+.video-container { 
+    position: relative; 
+    flex: 1; 
+    display: flex; 
+    flex-direction: column; 
+    height: 100%;
+}
+
+/* Remote video takes up full background space */
+#remoteVideo { 
+    width: 100%; 
+    height: 100%; 
+    object-fit: cover; 
+    background: #1a1a1a;
+}
+
+/* Local video is a "Picture-in-Picture" floating box */
+#localVideo { 
+    position: absolute; 
+    top: 20px; 
+    right: 20px; 
+    width: 120px; 
+    height: 160px; 
+    object-fit: cover; 
+    border-radius: 12px; 
+    border: 2px solid rgba(255,255,255,0.5);
+    background: #000;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    z-index: 10;
+}
+
+.controls { 
+    position: absolute; 
+    bottom: 30px; 
+    left: 0; 
+    right: 0; 
+    display: flex; 
+    justify-content: center; 
+    gap: 15px; 
+    z-index: 20;
+    padding: 0 20px;
+}
+
+input { 
+    padding: 12px; 
+    border-radius: 25px; 
+    border: none; 
+    background: rgba(255,255,255,0.9); 
+    width: 100px;
+    text-align: center;
+}
+
+button { 
+    padding: 12px 20px; 
+    border-radius: 25px; 
+    border: none; 
+    font-weight: bold; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    cursor: pointer;
+}
+
+.btn-join { background: #007bff; color: white; }
+.btn-flip { background: #333; color: white; border: 1px solid #555; }
+
+/* Active state for Join button */
+button:active { transform: scale(0.95); }
