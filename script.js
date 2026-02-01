@@ -28,6 +28,59 @@ const controlsBar = document.getElementById('controlsBar');
 const appContainer = document.getElementById('appContainer');
 const localVideoContainer = document.getElementById('localVideoContainer');
 
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playBeep(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    if (type === 'on') {
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(600, audioCtx.currentTime); 
+
+        oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+    } else if (type === 'off') {
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(400, audioCtx.currentTime); 
+
+        oscillator.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
+    } else if (type === 'end') {
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+        oscillator.frequency.linearRampToValueAtTime(50, audioCtx.currentTime + 0.3);
+    }
+
+    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + (type === 'end' ? 0.3 : 0.1));
+
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + (type === 'end' ? 0.3 : 0.1));
+}
+
+function showNotification(message) {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+        border-radius: 20px; font-size: 14px; z-index: 200; pointer-events: none;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3); backdrop-filter: blur(4px);
+        opacity: 0; transition: opacity 0.3s;
+    `;
+    document.body.appendChild(toast);
+
+    requestAnimationFrame(() => toast.style.opacity = '1');
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 2500);
+}
+
 function showControls() {
     controlsBar.classList.remove('fade-out');
     resetControlsTimeout();
@@ -35,12 +88,10 @@ function showControls() {
 
 function resetControlsTimeout() {
     clearTimeout(controlsTimeout);
-
     if (!callControls.classList.contains('hidden')) {
         controlsTimeout = setTimeout(() => {
             controlsBar.classList.add('fade-out');
         }, 3000); 
-
     }
 }
 
@@ -52,19 +103,15 @@ makeDraggable(localVideoContainer);
 
 function makeDraggable(elmnt) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-
     elmnt.onmousedown = dragMouseDown;
     elmnt.ontouchstart = dragMouseDown;
 
     function dragMouseDown(e) {
-
         clearTimeout(controlsTimeout);
-
         const clientX = e.clientX || e.touches[0].clientX;
         const clientY = e.clientY || e.touches[0].clientY;
         pos3 = clientX;
         pos4 = clientY;
-
         document.onmouseup = closeDragElement;
         document.ontouchend = closeDragElement;
         document.onmousemove = elementDrag;
@@ -75,21 +122,16 @@ function makeDraggable(elmnt) {
         e.preventDefault();
         const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
         const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
-
         pos1 = pos3 - clientX;
         pos2 = pos4 - clientY;
         pos3 = clientX;
         pos4 = clientY;
-
         let newTop = elmnt.offsetTop - pos2;
         let newLeft = elmnt.offsetLeft - pos1;
-
         const maxTop = window.innerHeight - elmnt.offsetHeight;
         const maxLeft = window.innerWidth - elmnt.offsetWidth;
-
         newTop = Math.max(0, Math.min(newTop, maxTop));
         newLeft = Math.max(0, Math.min(newLeft, maxLeft));
-
         elmnt.style.top = newTop + "px";
         elmnt.style.left = newLeft + "px";
         elmnt.style.right = 'auto'; 
@@ -101,7 +143,6 @@ function makeDraggable(elmnt) {
         document.ontouchend = null;
         document.ontouchmove = null;
         resetControlsTimeout(); 
-
     }
 }
 
@@ -110,6 +151,11 @@ function toggleMic() {
         isAudioEnabled = !isAudioEnabled;
         localStream.getAudioTracks()[0].enabled = isAudioEnabled;
         document.getElementById('btnMic').classList.toggle('btn-off', !isAudioEnabled);
+
+        playBeep(isAudioEnabled ? 'on' : 'off');
+        showNotification(isAudioEnabled ? 'Microphone On' : 'Microphone Muted');
+
+        socket.emit('media-toggle', { roomId: roomIdInput.value.trim().toLowerCase(), type: 'audio', enabled: isAudioEnabled });
     }
 }
 
@@ -118,6 +164,11 @@ function toggleVideo() {
         isVideoEnabled = !isVideoEnabled;
         localStream.getVideoTracks()[0].enabled = isVideoEnabled;
         document.getElementById('btnCam').classList.toggle('btn-off', !isVideoEnabled);
+
+        playBeep(isVideoEnabled ? 'on' : 'off');
+        showNotification(isVideoEnabled ? 'Camera On' : 'Camera Off');
+
+        socket.emit('media-toggle', { roomId: roomIdInput.value.trim().toLowerCase(), type: 'video', enabled: isVideoEnabled });
     }
 }
 
@@ -151,9 +202,11 @@ async function joinRoom() {
 }
 
 async function endCall() {
+    playBeep('end');
     if (peerConnection) peerConnection.close();
     if (localStream) localStream.getTracks().forEach(t => t.stop());
-    window.location.reload(); 
+    setTimeout(() => window.location.reload(), 500); 
+
 }
 
 function toggleChat() {
@@ -211,11 +264,16 @@ socket.on('room-joined', () => {
     if (isInitiator) initiateCall(); 
 });
 socket.on('full-room', () => { alert("Room Full"); location.reload(); });
+
 socket.on('chat-message', (text) => {
     appendMessage(text, 'remote');
     chatOverlay.classList.remove('hidden');
     showControls(); 
+});
 
+socket.on('media-toggle', ({ type, enabled }) => {
+    const status = enabled ? 'enabled' : 'disabled';
+    showNotification(`Peer ${status} ${type}`);
 });
 
 socket.on('offer', async (sdp) => {
@@ -251,7 +309,12 @@ function createPeerConnection() {
     };
 
     peerConnection.oniceconnectionstatechange = () => {
-        if (peerConnection.iceConnectionState === 'disconnected') endCall();
+        if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'failed') {
+            playBeep('end');
+            showNotification('Peer Disconnected');
+            setTimeout(() => window.location.reload(), 2000); 
+
+        }
     };
 }
 
