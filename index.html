@@ -3,24 +3,94 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mobile WebRTC Chat</title>
+    <title>StreamLine Video</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="video-container">
-        <video id="remoteVideo" autoplay playsinline></video>
-        <video id="localVideo" autoplay playsinline muted></video>
+    <div class="app-container" id="appContainer">
         
-        <div class="controls">
-            <input type="text" id="roomId" value="room1">
-            <button class="btn-join" onclick="joinRoom()">Join</button>
-            <button class="btn-flip" onclick="flipCamera()">📷 Flip</button>
+        <div class="video-stage">
+            <div id="statusText" class="status-text">
+                <div class="loader"></div>
+                <p>Ready to Join</p>
+            </div>
+            
+            <video id="remoteVideo" autoplay playsinline></video>
+            
+            <div id="localVideoContainer" class="local-video-wrapper">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <div class="drag-handle">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="white">
+                        <path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <div id="chatOverlay" class="chat-overlay hidden">
+            <div class="chat-header">
+                <span style="display: flex; align-items: center; gap: 10px;">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+    </svg>
+    Chat
+</span>
+                <button class="btn-close" onclick="toggleChat()">×</button>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <div class="chat-input-area">
+                <input type="text" id="chatInput" placeholder="Type a message..." onkeypress="handleEnter(event)">
+                <button class="btn-send" onclick="sendMessage()">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div id="controlsBar" class="controls-bar">
+            
+            <div id="joinControls" class="control-group">
+                <input type="text" id="roomId" placeholder="Room Name" value="room1">
+                <button id="btnJoin" class="btn-primary" onclick="joinRoom()">Join</button>
+            </div>
+
+            <div id="callControls" class="control-group hidden">
+                
+                <button id="btnMic" class="btn-icon" onclick="toggleMic()">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                        <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                    </svg>
+                </button>
+
+                <button id="btnCam" class="btn-icon" onclick="toggleVideo()">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                        <path d="M15 8v8H5V8h10m1-2H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4V7c0-.55-.45-1-1-1z"/>
+                    </svg>
+                </button>
+
+                <button class="btn-icon mobile-only" onclick="flipCamera()">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                        <path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 11.5V13H9v2.5L5.5 12 9 8.5V11h6V8.5l3.5 3.5-3.5 3.5z"/>
+                    </svg>
+                </button>
+
+                <button class="btn-icon" onclick="toggleChat()">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                </button>
+
+                <button class="btn-danger" onclick="endCall()">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
+                         <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.36 7.46 6 12 6s8.66 2.36 11.71 5.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     </div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    
     <script src="script.js"></script>
 </body>
 </html>
