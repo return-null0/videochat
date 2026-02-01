@@ -25,10 +25,10 @@ A lightweight, peer-to-peer video chat application built with **WebRTC**, **Sock
 This frontend requires a backend signaling server to handle the initial connection handshake (Room joining, Session Description Protocol exchange, Interactive Connectivity Establishment candidates).
 
 > **Note:** The signaling server logic is hosted in a [separate repository](https://github.com/return-null0/signalingserver/)
-Ensure you have that server deployed (e.g., on Render or Heroku) and have the URL ready before running this client.
+Ensure you have that the server is before running this client.
 
 **2. HTTPS (For Mobile)**
-To test on mobile devices, this client must be served over **HTTPS** (or `localhost`), otherwise browser security policies will block camera and microphone access.
+To test on mobile devices, this client must be served over **HTTPS** otherwise browser security policies will block camera and microphone access.
 
 ## Usage
 
