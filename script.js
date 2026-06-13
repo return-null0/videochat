@@ -1,18 +1,17 @@
 const SIGNALING_SERVER_URL = 'https://signalingserver-wz1q.onrender.com'; 
-
-const ICE_SERVERS = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-};
+const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 const socket = io(SIGNALING_SERVER_URL);
 
 let localStream;
+let screenStream;
 let peerConnection;
 let isInitiator = false;
 let currentFacingMode = 'user';
 let isAudioEnabled = true;
 let isVideoEnabled = true;
 let controlsTimeout; 
+let activeRoomId = '';
 
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
@@ -27,6 +26,7 @@ const chatInput = document.getElementById('chatInput');
 const controlsBar = document.getElementById('controlsBar');
 const appContainer = document.getElementById('appContainer');
 const localVideoContainer = document.getElementById('localVideoContainer');
+const floatingPiP = document.getElementById('floatingPiP');
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -41,12 +41,10 @@ function playBeep(type) {
     if (type === 'on') {
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(600, audioCtx.currentTime); 
-
         oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
     } else if (type === 'off') {
         oscillator.type = 'triangle';
         oscillator.frequency.setValueAtTime(400, audioCtx.currentTime); 
-
         oscillator.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
     } else if (type === 'end') {
         oscillator.type = 'sawtooth';
@@ -72,7 +70,6 @@ function showNotification(message) {
         opacity: 0; transition: opacity 0.3s;
     `;
     document.body.appendChild(toast);
-
     requestAnimationFrame(() => toast.style.opacity = '1');
 
     setTimeout(() => {
@@ -83,6 +80,9 @@ function showNotification(message) {
 
 function showControls() {
     controlsBar.classList.remove('fade-out');
+    if (floatingPiP && !floatingPiP.classList.contains('hidden')) {
+        floatingPiP.classList.remove('fade-out');
+    }
     resetControlsTimeout();
 }
 
@@ -91,12 +91,13 @@ function resetControlsTimeout() {
     if (!callControls.classList.contains('hidden')) {
         controlsTimeout = setTimeout(() => {
             controlsBar.classList.add('fade-out');
+            if (floatingPiP) floatingPiP.classList.add('fade-out');
         }, 3000); 
     }
 }
 
 appContainer.addEventListener('mousemove', showControls);
-appContainer.addEventListener('touchstart', showControls);
+appContainer.addEventListener('touchstart', showControls, { passive: true });
 appContainer.addEventListener('click', showControls);
 
 makeDraggable(localVideoContainer);
@@ -146,16 +147,21 @@ function makeDraggable(elmnt) {
     }
 }
 
+window.addEventListener('resize', () => {
+    const maxTop = window.innerHeight - localVideoContainer.offsetHeight;
+    const maxLeft = window.innerWidth - localVideoContainer.offsetWidth;
+    if (localVideoContainer.offsetTop > maxTop) localVideoContainer.style.top = `${Math.max(0, maxTop)}px`;
+    if (localVideoContainer.offsetLeft > maxLeft) localVideoContainer.style.left = `${Math.max(0, maxLeft)}px`;
+});
+
 function toggleMic() {
     if (localStream) {
         isAudioEnabled = !isAudioEnabled;
         localStream.getAudioTracks()[0].enabled = isAudioEnabled;
         document.getElementById('btnMic').classList.toggle('btn-off', !isAudioEnabled);
-
         playBeep(isAudioEnabled ? 'on' : 'off');
         showNotification(isAudioEnabled ? 'Microphone On' : 'Microphone Muted');
-
-        socket.emit('media-toggle', { roomId: roomIdInput.value.trim().toLowerCase(), type: 'audio', enabled: isAudioEnabled });
+        socket.emit('media-toggle', { roomId: activeRoomId, type: 'audio', enabled: isAudioEnabled });
     }
 }
 
@@ -164,11 +170,9 @@ function toggleVideo() {
         isVideoEnabled = !isVideoEnabled;
         localStream.getVideoTracks()[0].enabled = isVideoEnabled;
         document.getElementById('btnCam').classList.toggle('btn-off', !isVideoEnabled);
-
         playBeep(isVideoEnabled ? 'on' : 'off');
         showNotification(isVideoEnabled ? 'Camera On' : 'Camera Off');
-
-        socket.emit('media-toggle', { roomId: roomIdInput.value.trim().toLowerCase(), type: 'video', enabled: isVideoEnabled });
+        socket.emit('media-toggle', { roomId: activeRoomId, type: 'video', enabled: isVideoEnabled });
     }
 }
 
@@ -177,36 +181,108 @@ async function flipCamera() {
     await startCamera();
 }
 
-async function joinRoom() {
-    const roomId = roomIdInput.value.trim().toLowerCase();
-    if (!roomId) return alert("Enter Room ID");
+async function toggleScreenShare() {
+    const btnScreen = document.getElementById('btnScreen');
+    if (!screenStream) {
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            
+            if (peerConnection) {
+                const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender) await sender.replaceTrack(screenTrack);
+            }
+            
+            localVideo.srcObject = screenStream;
+            btnScreen.classList.add('btn-active');
+            playBeep('on');
+            showNotification('Screen Sharing Started');
+            
+            screenTrack.onended = () => { stopScreenShare(); };
+        } catch (err) {
+            console.error("Failed to share screen:", err);
+            showNotification('Screen Share Cancelled');
+        }
+    } else {
+        stopScreenShare();
+    }
+}
 
+async function stopScreenShare() {
+    if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        screenStream = null;
+    }
+    const btnScreen = document.getElementById('btnScreen');
+    btnScreen.classList.remove('btn-active');
+    playBeep('off');
+    
+    if (localStream) {
+        const videoTrack = localStream.getVideoTracks()[0];
+        localVideo.srcObject = localStream;
+        if (peerConnection) {
+            const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender) await sender.replaceTrack(videoTrack);
+        }
+    }
+    showNotification('Screen Sharing Stopped');
+}
+
+async function togglePiP() {
+    if (!document.pictureInPictureEnabled) {
+        return showNotification('Picture-in-Picture Not Supported');
+    }
+    
+    try {
+        if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+            showNotification('Exited Picture-in-Picture');
+        } else {
+            if (!remoteVideo.srcObject || !remoteVideo.srcObject.active) {
+                return showNotification('Requires active peer in room');
+            }
+            
+            await remoteVideo.requestPictureInPicture();
+            showNotification('Entered Picture-in-Picture');
+        }
+    } catch (err) {
+        console.error("PiP Error:", err);
+        showNotification('Video stream buffering, try again');
+    }
+}
+
+async function joinRoom() {
+    const inputId = roomIdInput.value.trim().toLowerCase();
+    if (!inputId) return alert("Please enter a Room ID");
+
+    activeRoomId = inputId;
     btnJoin.disabled = true;
     btnJoin.innerText = "Connecting...";
 
     try {
         await startCamera();
-        socket.emit('join-room', roomId);
-
+        socket.emit('join-room', activeRoomId);
         joinControls.classList.add('hidden');
         callControls.classList.remove('hidden');
+        joinControls.classList.add('hidden');
+        callControls.classList.remove('hidden');
+        floatingPiP.classList.remove('hidden');
         statusText.innerHTML = '<div class="loader"></div><p>Waiting for peer...</p>';
         resetControlsTimeout(); 
-
     } catch (err) {
-        console.error(err);
-        alert("Camera Error");
+        console.error("Failed to access media appliances:", err);
+        alert("Device selection configuration error. Check permissions.");
         btnJoin.disabled = false;
         btnJoin.innerText = "Join";
     }
 }
 
-async function endCall() {
+function endCall() {
     playBeep('end');
     if (peerConnection) peerConnection.close();
     if (localStream) localStream.getTracks().forEach(t => t.stop());
+    if (screenStream) screenStream.getTracks().forEach(t => t.stop());
     setTimeout(() => window.location.reload(), 500); 
-
 }
 
 function toggleChat() {
@@ -216,9 +292,9 @@ function toggleChat() {
 
 function sendMessage() {
     const text = chatInput.value.trim();
-    if (text) {
+    if (text && activeRoomId) {
         appendMessage(text, 'local');
-        socket.emit('chat-message', { roomId: roomIdInput.value.trim().toLowerCase(), text: text });
+        socket.emit('chat-message', { roomId: activeRoomId, text: text });
         chatInput.value = '';
     }
 }
@@ -243,13 +319,12 @@ async function startCamera() {
 
     localStream = await navigator.mediaDevices.getUserMedia(constraints);
     localVideo.srcObject = localStream;
-
     localStream.getAudioTracks()[0].enabled = isAudioEnabled;
     localStream.getVideoTracks()[0].enabled = isVideoEnabled;
 
     if (peerConnection) {
         const videoTrack = localStream.getVideoTracks()[0];
-        const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
+        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
         if (sender) sender.replaceTrack(videoTrack);
 
         const audioTrack = localStream.getAudioTracks()[0];
@@ -263,7 +338,7 @@ socket.on('room-joined', () => {
     statusText.style.display = 'none'; 
     if (isInitiator) initiateCall(); 
 });
-socket.on('full-room', () => { alert("Room Full"); location.reload(); });
+socket.on('full-room', () => { alert("Room Full"); window.location.reload(); });
 
 socket.on('chat-message', (text) => {
     appendMessage(text, 'remote');
@@ -279,20 +354,31 @@ socket.on('media-toggle', ({ type, enabled }) => {
 socket.on('offer', async (sdp) => {
     if (!peerConnection) createPeerConnection();
     statusText.style.display = 'none';
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    socket.emit('answer', { roomId: roomIdInput.value.trim().toLowerCase(), sdp: answer });
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('answer', { roomId: activeRoomId, sdp: answer });
+    } catch (error) {
+        console.error("Error handling offer:", error);
+    }
 });
 
 socket.on('answer', async (sdp) => {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+    } catch (error) {
+        console.error("Error setting remote description from answer:", error);
+    }
 });
 
 socket.on('ice-candidate', async (candidate) => {
     if (peerConnection) {
-        try { await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); }
-        catch (e) { console.error(e); }
+        try { 
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); 
+        } catch (e) { 
+            console.error("Error adding ICE candidate:", e); 
+        }
     }
 });
 
@@ -301,7 +387,9 @@ function createPeerConnection() {
     localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
     peerConnection.onicecandidate = (event) => {
-        if (event.candidate) socket.emit('ice-candidate', { roomId: roomIdInput.value.trim().toLowerCase(), candidate: event.candidate });
+        if (event.candidate) {
+            socket.emit('ice-candidate', { roomId: activeRoomId, candidate: event.candidate });
+        }
     };
 
     peerConnection.ontrack = (event) => {
@@ -313,15 +401,17 @@ function createPeerConnection() {
             playBeep('end');
             showNotification('Peer Disconnected');
             setTimeout(() => window.location.reload(), 2000); 
-
         }
     };
 }
 
-function initiateCall() {
+async function initiateCall() {
     createPeerConnection();
-    peerConnection.createOffer().then(offer => {
-        peerConnection.setLocalDescription(offer);
-        socket.emit('offer', { roomId: roomIdInput.value.trim().toLowerCase(), sdp: offer });
-    });
+    try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('offer', { roomId: activeRoomId, sdp: offer });
+    } catch (error) {
+        console.error("Error initiating call:", error);
+    }
 }
