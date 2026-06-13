@@ -154,6 +154,15 @@ window.addEventListener('resize', () => {
     if (localVideoContainer.offsetLeft > maxLeft) localVideoContainer.style.left = `${Math.max(0, maxLeft)}px`;
 });
 
+window.addEventListener('beforeunload', () => {
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+    if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+    }
+});
+
 function toggleMic() {
     if (localStream) {
         isAudioEnabled = !isAudioEnabled;
@@ -317,19 +326,33 @@ async function startCamera() {
         video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
     };
 
-    localStream = await navigator.mediaDevices.getUserMedia(constraints);
-    localVideo.srcObject = localStream;
-    localStream.getAudioTracks()[0].enabled = isAudioEnabled;
-    localStream.getVideoTracks()[0].enabled = isVideoEnabled;
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localVideo.srcObject = localStream;
+        localStream.getAudioTracks()[0].enabled = isAudioEnabled;
+        localStream.getVideoTracks()[0].enabled = isVideoEnabled;
 
-    if (peerConnection) {
-        const videoTrack = localStream.getVideoTracks()[0];
-        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-        if (sender) sender.replaceTrack(videoTrack);
+        if (peerConnection) {
+            const videoTrack = localStream.getVideoTracks()[0];
+            const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender) sender.replaceTrack(videoTrack);
 
-        const audioTrack = localStream.getAudioTracks()[0];
-        const audioSender = peerConnection.getSenders().find(s => s.track.kind === 'audio');
-        if (audioSender) audioSender.replaceTrack(audioTrack);
+            const audioTrack = localStream.getAudioTracks()[0];
+            const audioSender = peerConnection.getSenders().find(s => s.track.kind === 'audio');
+            if (audioSender) audioSender.replaceTrack(audioTrack);
+        }
+    } catch (err) {
+        console.error("Hardware Access Error:", err);
+        
+        if (err.name === 'NotReadableError') {
+            alert("Camera is gray because another app (or tab) is currently using it. Please close other camera apps and refresh.");
+        } else if (err.name === 'NotAllowedError') {
+            alert("Camera permission was denied by the browser settings.");
+        } else if (err.name === 'OverconstrainedError') {
+            alert("Your camera does not support the requested HD resolution.");
+        } else {
+            alert("Hardware error: Could not start the camera.");
+        }
     }
 }
 
