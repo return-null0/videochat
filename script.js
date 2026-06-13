@@ -321,14 +321,24 @@ function appendMessage(text, type) {
 async function startCamera() {
     if (localStream) localStream.getTracks().forEach(t => t.stop());
 
-    const constraints = {
-        audio: true,
-        video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
-    };
+    const isMobile = window.innerWidth <= 768;
+
+const constraints = {
+    audio: true,
+    video: { 
+        facingMode: currentFacingMode,
+        ...(isMobile ? {} : { width: { ideal: 1280 }, height: { ideal: 720 } })
+    }
+};
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
         localVideo.srcObject = localStream;
+
+localVideo.play().catch(error => {
+    console.warn("Autoplay prevented by mobile browser:", error);
+});
+        
         localStream.getAudioTracks()[0].enabled = isAudioEnabled;
         localStream.getVideoTracks()[0].enabled = isVideoEnabled;
 
